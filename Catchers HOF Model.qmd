@@ -1,0 +1,573 @@
+---
+title: "HOF MODEL"
+format: html
+editor: visual
+---
+
+## Libraries
+
+```{r}
+library(dplyr)
+library(stringr)
+library(janitor)
+library(Lahman)
+library(tidymodels)
+library(readxl)
+
+
+```
+
+## Simplify AQCS Names
+
+```{r}
+AQCS <- read_excel("All Qualified Catchers Stats.xlsx") %>%
+  clean_names() %>%
+  mutate(
+    name_clean = name %>%
+      str_replace_all("\\.", "") %>%   
+      str_replace_all(",", "") %>%     
+      str_replace_all("'", "") %>%
+      str_replace_all("-", " ") %>%    
+      str_squish() %>%      
+      str_to_lower()
+  )
+
+```
+
+## Lahman Name Cleaning
+
+```{r}
+people_lookup <- Lahman::People %>%
+  as_tibble() %>%
+  transmute(
+    playerID,
+    name_clean = paste(nameFirst, nameLast) %>%
+      str_replace_all("\\.", "") %>%
+      str_replace_all(",", "") %>%
+      str_replace_all("'", "") %>%
+      str_replace_all("-", " ") %>%
+      str_squish() %>%
+      str_to_lower()
+  )
+```
+
+## Join AQCS and Lahman
+
+```{r}
+AQCS <- AQCS %>%
+  left_join(people_lookup, by = "name_clean")
+
+manual_name_map <- tibble::tribble(
+  ~name,                  ~playerID,
+  "A.J. Pierzynski",      "pierzaj01",
+  "B.J. Surhoff",         "surhobj01",
+  "Billy Sullivan Jr.",   "sullibi04",
+  "Billy Sullivan Sr.",   "sullibi03",
+  "Chief Meyers",         "meyerch01",
+  "Chief Zimmer",         "zimmech01",
+  "Christian Vázquez",    "vazquch01",
+  "Eddie Taubensee",      "taubeed01",
+  "Gary Sánchez",         "sanchga02",
+  "J.T. Realmuto",       "realmjt01",
+  "Martín Maldonado",     "maldoma01",
+  "Sandy Alomar Jr.",     "alomasa02",
+  "Tony Peña Sr.",        "penato01"
+)
+
+AQCS <- AQCS %>%
+  left_join(manual_name_map, by = "name", suffix = c("", "_manual")) %>%
+  mutate(playerID = coalesce(playerID, playerID_manual)) %>%
+  select(-playerID_manual) %>%
+  filter(name != "Frank Duncan")
+
+
+'
+###CODE USED IN PROCESS###
+#How many matched?
+AQCS %>%
+  summarise(
+    total = n(),
+    matched = sum(!is.na(playerID)),
+    match_rate = matched / total
+  )
+
+unmatched_names <- AQCS %>%
+  filter(is.na(playerID)) %>%
+  distinct(name) %>%
+  arrange(name)
+
+unmatched_names
+"
+A.J. Pierzynski		
+B.J. Surhoff		
+Billy Sullivan Jr.		
+Billy Sullivan Sr.		
+Chief Meyers		
+Chief Zimmer		
+Christian Vázquez		
+Eddie Taubensee		
+Frank Duncan		
+Gary Sánchez
+"
+find_people <- function(pattern) {
+  People %>%
+    as_tibble() %>%
+    transmute(
+      playerID,
+      full_name = paste(nameFirst, nameLast),
+      nameFirst,
+      nameLast
+    ) %>%
+    filter(str_detect(str_to_lower(full_name), str_to_lower(pattern))) %>%
+    arrange(nameLast, nameFirst)
+}
+
+find_people("Peña")
+
+Lahman::People |> dplyr::filter(playerID == "penato01")
+'
+
+```
+
+## Add All-Star Apps to AQCS
+
+```{r}
+allstar_counts <- Lahman::AllstarFull %>%
+  as_tibble() %>%
+  count(playerID, name = "all_star_selections")
+
+AQCS <- AQCS %>%
+  left_join(allstar_counts, by = "playerID") %>%
+  mutate(all_star_selections = coalesce(all_star_selections, 0L))
+
+###Sanity Checks Below###
+'
+AQCS %>% select(name, playerID, all_star_selections) %>% arrange(desc(all_star_selections)) %>% head(15)
+AQCS %>% filter(str_detect(name, "Molina")) %>% select(name, all_star_selections)
+'
+
+```
+
+## Add Gold Gloves, Silver Sluggers, and MVPs
+
+```{r}
+awards <- Lahman::AwardsPlayers %>%
+  as_tibble()
+
+# Gold Gloves (career count)
+gg_counts <- awards %>%
+  filter(awardID == "Gold Glove") %>%
+  count(playerID, name = "gg")
+
+# Silver Sluggers (career count)
+ss_counts <- awards %>%
+  filter(awardID == "Silver Slugger") %>%
+  count(playerID, name = "ss")
+
+# MVP awards won (career count)
+mvp_awards <- awards %>%
+  filter(awardID == "Most Valuable Player") %>%
+  count(playerID, name = "mvp_awards")
+
+AQCS <- AQCS %>%
+  left_join(gg_counts,  by = "playerID") %>%
+  left_join(ss_counts,  by = "playerID") %>%
+  left_join(mvp_awards, by = "playerID") %>%
+  mutate(
+    gg = coalesce(gg, 0L),
+    ss = coalesce(ss, 0L),
+    mvp_awards = coalesce(mvp_awards, 0L)
+  )
+
+'
+### CODE USED IN PROCESS ###
+names(Lahman::AwardsSharePlayers)
+head(Lahman::AwardsSharePlayers)
+
+Lahman::AwardsSharePlayers %>%
+  distinct(awardID) %>%
+  arrange(awardID)
+
+### Sanity Checks Below
+AQCS %>%
+  select(name, all_star_selections, gg, ss, mvp_awards) %>%
+  arrange(desc(mvp_awards), desc(all_star_selections)) %>%
+  head(20)
+'
+
+
+```
+
+## Create HOF label
+
+```{r}
+
+cutoff_last_mlb_year <- 2012
+
+hof_lookup <- Lahman::HallOfFame %>%
+  as_tibble() %>%
+  group_by(playerID) %>%
+  summarise(
+    inducted_any = any(inducted == "Y", na.rm = TRUE),
+    .groups = "drop"
+  )
+
+last_mlb_year_lookup <- Lahman::Batting %>%
+  as_tibble() %>%
+  group_by(playerID) %>%
+  summarise(last_mlb_year = max(yearID, na.rm = TRUE), .groups = "drop")
+
+AQCS <- AQCS %>%
+  left_join(hof_lookup, by = "playerID") %>%
+  left_join(last_mlb_year_lookup, by = "playerID") %>%
+  mutate(
+    inducted_any = coalesce(inducted_any, FALSE),
+    hof_resolved = inducted_any | (!is.na(last_mlb_year) & last_mlb_year <= cutoff_last_mlb_year),
+    hof = case_when(
+      inducted_any ~ 1L,
+      hof_resolved ~ 0L,
+      TRUE ~ NA_integer_
+    )
+  )
+'
+### Sanity Checks Below
+# how many got labeled
+AQCS %>%
+  summarise(
+    total = n(),
+    labeled = sum(!is.na(hof)),
+    labeled_rate = labeled / total,
+    hof_yes = sum(hof == 1, na.rm = TRUE),
+    hof_no  = sum(hof == 0, na.rm = TRUE)
+  )
+'
+```
+
+## Remove Unlabeled Players (recent retirees)
+
+```{r}
+AQCS_model <- AQCS %>%
+  filter(!is.na(hof))
+
+AQCS_holdout <- AQCS %>%
+  filter(is.na(hof))
+
+'
+###Sanity Check Below
+nrow(AQCS_model) + nrow(AQCS_holdout) == nrow(AQCS)
+
+View(AQCS_model)
+'
+```
+
+## Pick Model Variables
+
+```{r}
+model_features <- c(
+  "war",
+  "pa",
+  "g",
+  "w_rc",
+  "w_oba",
+  "def",
+  "fielding",
+  "positional",
+  "all_star_selections",
+  "gg",
+  "ss",
+  "mvp_awards"
+)
+
+AQCS_model_ready <- AQCS %>%
+  filter(!is.na(hof)) %>%        # resolved only
+  select(all_of(model_features), hof, last_mlb_year)
+
+'
+##Sanity Check Below
+glimpse(AQCS_model_ready)
+'
+
+
+
+```
+
+## Split Data
+
+```{r}
+train_cutoff_year <- 2005
+
+train_data <- AQCS_model_ready %>%
+  filter(last_mlb_year <= train_cutoff_year) %>%
+  select(-last_mlb_year)
+
+test_data <- AQCS_model_ready %>%
+  filter(last_mlb_year > train_cutoff_year) %>%
+  select(-last_mlb_year)
+
+'
+###IMPORTANT Sanity Checks Below
+# Row counts
+nrow(train_data)
+nrow(test_data)
+
+# Class balance
+table(train_data$hof)
+table(test_data$hof)
+
+# Missing values check
+sapply(train_data, function(x) sum(is.na(x)))
+'
+```
+
+## Build the recipe for training (no training yet)
+
+```{r}
+
+#seed 4 for yadi himself
+set.seed(4)
+
+# Ensure outcome is a factor for classification
+train_data <- train_data %>%
+  mutate(hof = factor(hof, levels = c(0, 1)))
+
+test_data <- test_data %>%
+  mutate(hof = factor(hof, levels = c(0, 1)))
+
+# Recipe: impute + scale
+hof_recipe <- recipe(hof ~ ., data = train_data) %>%
+  step_impute_median(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+# Model: regularized logistic regression
+hof_model <- logistic_reg(
+  penalty = tune(),
+  mixture = 0 
+) %>%
+  set_engine("glmnet")
+
+# Workflow
+hof_workflow <- workflow() %>%
+  add_recipe(hof_recipe) %>%
+  add_model(hof_model)
+
+'
+###Sanity Checks
+table(train_data$hof)
+table(test_data$hof)
+sum(is.na(train_data))
+sum(is.na(test_data))
+'
+
+```
+
+## Overfitting Adjustments
+
+```{r}
+
+set.seed(4)
+
+hof_folds <- vfold_cv(
+  train_data,
+  v = 5,
+  repeats = 10,
+  strata = hof
+)
+
+
+# Penalty grid (log scale works best)
+penalty_grid <- grid_regular(
+  penalty(range = c(-4, 1)),  # 10^-4 to 10^1
+  levels = 20
+)
+
+# Tune
+hof_tune <- tune_grid(
+  hof_workflow,
+  resamples = hof_folds,
+  grid = penalty_grid,
+  metrics = metric_set(roc_auc)
+)
+
+# Select best penalty
+best_penalty <- select_best(hof_tune, metric = "roc_auc")
+
+best_penalty
+
+```
+
+## Train Data, Fit Model
+
+```{r}
+set.seed(4)
+
+final_workflow <- finalize_workflow(hof_workflow, best_penalty)
+
+final_fit <- fit(final_workflow, data = train_data)
+
+```
+
+## Evaluate (once!) on the test set
+
+```{r}
+test_pred <- predict(final_fit, new_data = test_data, type = "prob") %>%
+  bind_cols(test_data %>% select(hof)) %>%
+  mutate(
+    .pred_class = factor(
+      if_else(.pred_1 >= 0.5, "1", "0"),
+      levels = c("0", "1")
+    )
+  )
+
+metrics <- metric_set(roc_auc, accuracy, sens, spec)
+
+metrics(test_pred, truth = hof, estimate = .pred_class, .pred_1)
+
+conf_mat(
+  test_pred,
+  truth = hof,
+  estimate = .pred_class
+)
+
+### Model looks good to move on
+
+```
+
+## Create new Dataset with all labeled players
+
+```{r}
+predict_data <- AQCS %>%
+  filter(is.na(hof))
+
+```
+
+## Reiterate Workflow
+
+```{r}
+final_workflow <- finalize_workflow(hof_workflow, best_penalty)
+
+```
+
+## Train model (once!)
+
+```{r}
+final_fit <- fit(final_workflow, data = train_data)
+```
+
+## Predict for unlabeled players
+
+```{r}
+predict_results <- predict(final_fit, new_data = predict_data, type = "prob") %>%
+  bind_cols(predict_data %>% select(name, playerID)) %>%
+  rename(p_hof = .pred_1) %>%
+  arrange(desc(p_hof))
+
+```
+
+## RESULTS
+
+```{r}
+###YADI SPECIFICALLY
+predict_results %>%
+  filter(str_detect(name, "Molina")) %>%
+  select(name, playerID, p_hof)
+
+###Likelihood of catchers who retired after 2012
+predict_results %>%
+  select(name, playerID, p_hof)
+
+
+
+```
+
+## Joe Mauer
+
+```{r}
+library(dplyr)
+library(stringr)
+library(tidymodels)
+
+set.seed(123)
+
+# --- SETTINGS (keep consistent with your pipeline) ---
+train_cutoff_year <- 2005  # use whatever you used earlier
+joe_id <- "mauerjo01"
+
+# --- 1) Pull Joe's row (as a prediction-only case) ---
+joe_row <- AQCS %>% filter(playerID == joe_id)
+
+# Safety checks
+stopifnot(nrow(joe_row) == 1)
+
+# --- 2) Rebuild the labeled modeling pool WITHOUT Joe ---
+AQCS_model_mauer <- AQCS %>%
+  filter(!is.na(hof)) %>%           # labeled only
+  filter(playerID != joe_id)        # remove Joe entirely
+
+# --- 3) Build the feature list exactly like your model used ---
+model_features <- c(
+  "WAR","PA","G","wRC+","Def","Fielding","Positional",
+  "all_star_selections","gg","ss","mvp_awards","last_mlb_year"
+)
+model_features <- model_features[model_features %in% names(AQCS_model_mauer)]
+
+# Assemble modeling table
+model_df <- AQCS_model_mauer %>%
+  select(all_of(model_features), hof) %>%
+  mutate(hof = factor(hof, levels = c(0, 1)))
+
+# --- 4) Modern-first split (WITHOUT Joe) ---
+train_df <- model_df %>% filter(last_mlb_year <= train_cutoff_year) %>% select(-last_mlb_year)
+test_df  <- model_df %>% filter(last_mlb_year >  train_cutoff_year) %>% select(-last_mlb_year)
+
+# --- 5) Recipe + model + workflow (ridge logistic) ---
+rec <- recipe(hof ~ ., data = train_df) %>%
+  step_impute_median(all_predictors()) %>%
+  step_normalize(all_predictors())
+
+mod <- logistic_reg(penalty = tune(), mixture = 0) %>%
+  set_engine("glmnet")
+
+wf <- workflow() %>%
+  add_recipe(rec) %>%
+  add_model(mod)
+
+# --- 6) CV tuning (WITHOUT Joe) ---
+folds <- vfold_cv(train_df, v = 5, strata = hof)
+
+grid <- grid_regular(
+  penalty(range = c(-4, 1)),  # 1e-4 to 10
+  levels = 20
+)
+
+tuned <- tune_grid(
+  wf,
+  resamples = folds,
+  grid = grid,
+  metrics = metric_set(roc_auc)
+)
+
+best_pen <- select_best(tuned, metric = "roc_auc")
+
+# --- 7) Fit final model (WITHOUT Joe) ---
+final_wf  <- finalize_workflow(wf, best_pen)
+final_fit <- fit(final_wf, data = train_df)
+
+# --- 8) Predict Joe's probability (Joe never touched tuning/training) ---
+joe_pred_data <- joe_row %>%
+  select(any_of(setdiff(model_features, "last_mlb_year")))  # predictors only
+
+joe_prob <- predict(final_fit, new_data = joe_pred_data, type = "prob") %>%
+  rename(p_hof = .pred_1) %>%
+  mutate(name = joe_row$name, playerID = joe_id) %>%
+  select(name, playerID, p_hof)
+
+joe_prob
+
+```
+
+```{r}
+All_Qualified_Catchers_Stats %>%
+  arrange(desc
+          (Def))
+
+```
