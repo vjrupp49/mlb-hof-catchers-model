@@ -2,6 +2,8 @@
 
 A regularized logistic regression model that estimates a modern MLB catcher's probability of Hall of Fame induction, built from the Lahman baseball database plus a hand-compiled stats file for all qualified catchers.
 
+![Predicted Hall of Fame probability for the model's highest-rated unresolved catchers, plus Joe Mauer's blind holdout prediction](hof_probability_chart.png)
+
 ## The question
 
 Given a catcher's career performance (WAR, offensive production, defense, awards, All-Star selections), what's their statistical probability of making the Hall of Fame?
@@ -23,6 +25,8 @@ As a last step, the model is retrained with Joe Mauer's row fully removed from t
 
 - `Catchers HOF Model.qmd` — full data pipeline, feature engineering, model tuning, and evaluation
 - `All Qualified Catchers Stats.xlsx` — the underlying dataset of career stats for every qualified catcher
+- `hof_probability_chart.R` — re-runs the pipeline end-to-end and renders the chart above (never reads in saved predictions, so it always reflects the actual fitted model)
+- `hof_probability_chart.png` — the rendered chart
 
 ## Tech
 
