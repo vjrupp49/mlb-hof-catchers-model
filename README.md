@@ -17,6 +17,12 @@ Given a catcher's career performance (WAR, offensive production, defense, awards
 - Built a `tidymodels` recipe (median imputation + normalization) feeding a ridge-penalized logistic regression (`glmnet`), with the penalty tuned via 5-fold, 10-repeat cross-validation optimizing ROC AUC
 - Fit the final model on the training set and evaluated on the held-out modern-era catchers
 
+## Results
+
+![ROC curve on the held-out test set of catchers whose careers ended after 2005, never seen during training or tuning, with an AUC of 0.94](hof_roc_curve.png)
+
+Evaluated once, on the held-out modern-era catchers: **0.94 AUC**, 95% accuracy, 100% sensitivity, 94.1% specificity. Encouraging, but read with real skepticism — the test set is small, since only a handful of catchers' careers both ended after 2005 and are resolved (long enough ago to have a settled Hall of Fame outcome).
+
 ## A fun final test
 
 As a last step, the model is retrained with Joe Mauer's row fully removed from training and tuning, then used to predict Mauer's own Hall of Fame probability from his career stats alone — a clean way to sanity-check the model against a real, well-known case without letting his row leak into training.
@@ -25,8 +31,8 @@ As a last step, the model is retrained with Joe Mauer's row fully removed from t
 
 - `Catchers HOF Model.qmd` — full data pipeline, feature engineering, model tuning, and evaluation
 - `All Qualified Catchers Stats.xlsx` — the underlying dataset of career stats for every qualified catcher
-- `hof_probability_chart.R` — re-runs the pipeline end-to-end and renders the chart above (never reads in saved predictions, so it always reflects the actual fitted model)
-- `hof_probability_chart.png` — the rendered chart
+- `hof_probability_chart.R` — re-runs the pipeline end-to-end and renders both charts above (never reads in saved predictions, so they always reflect the actual fitted model)
+- `hof_probability_chart.png`, `hof_roc_curve.png` — the rendered charts
 
 ## Tech
 
