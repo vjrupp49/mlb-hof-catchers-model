@@ -150,6 +150,49 @@ best_penalty <- select_best(hof_tune, metric = "roc_auc")
 final_workflow <- finalize_workflow(hof_workflow, best_penalty)
 final_fit <- fit(final_workflow, data = train_data)
 
+# ---- 4b) Evaluate on the held-out modern-era test set + plot ROC ----
+test_data <- AQCS_model_ready %>% filter(last_mlb_year > train_cutoff_year) %>% select(-last_mlb_year) %>%
+  mutate(hof = factor(hof, levels = c(0, 1)))
+
+test_pred <- predict(final_fit, new_data = test_data, type = "prob") %>%
+  bind_cols(test_data %>% select(hof)) %>%
+  mutate(.pred_class = factor(if_else(.pred_1 >= 0.5, "1", "0"), levels = c("0", "1")))
+
+test_metrics <- metric_set(roc_auc, accuracy, sens, spec)(
+  test_pred, truth = hof, estimate = .pred_class, .pred_1, event_level = "second"
+)
+print(test_metrics)
+
+roc_df <- roc_curve(test_pred, truth = hof, .pred_1, event_level = "second")
+auc_val <- test_metrics %>% filter(.metric == "roc_auc") %>% pull(.estimate)
+
+p_roc <- ggplot(roc_df, aes(x = 1 - specificity, y = sensitivity)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "#B9C0AF", linewidth = 0.5) +
+  geom_path(color = "#C7842A", linewidth = 1.1) +
+  annotate("text", x = 0.62, y = 0.12, hjust = 0, size = 4.2, color = "#5B6169",
+           label = paste0("Test AUC = ", scales::number(auc_val, accuracy = 0.01))) +
+  scale_x_continuous(labels = scales::percent_format(), expand = c(0.01, 0.01)) +
+  scale_y_continuous(labels = scales::percent_format(), expand = c(0.01, 0.01)) +
+  labs(
+    title = "Test-Set Performance",
+    subtitle = "Evaluated once, on post-2005 catchers never seen during training or tuning",
+    x = "False positive rate", y = "True positive rate",
+    caption = "Model: Catchers HOF Model.qmd  |  Data: Lahman database + hand-compiled qualified-catcher stats"
+  ) +
+  coord_equal() +
+  theme_minimal(base_size = 12) +
+  theme(
+    plot.title = element_text(face = "bold", size = 15),
+    plot.subtitle = element_text(color = "#5B6169", size = 10, margin = margin(b = 10)),
+    plot.caption = element_text(color = "#8A9389", size = 8, margin = margin(t = 10)),
+    axis.title = element_text(size = 10, color = "#5B6169"),
+    axis.text = element_text(size = 10.5, color = "#2B2620"),
+    panel.grid.minor = element_blank()
+  )
+
+ggsave("hof_roc_curve.png", p_roc, width = 7.5, height = 6.2, dpi = 200, bg = "white")
+cat("\nSaved hof_roc_curve.png\n")
+
 # ---- 5) Predict every unresolved (still-active-case) catcher ----
 predict_data <- AQCS %>% filter(is.na(hof))
 
