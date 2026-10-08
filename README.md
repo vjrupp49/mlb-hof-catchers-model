@@ -44,4 +44,4 @@ R, tidyverse, tidymodels, glmnet, the Lahman baseball database
 
 ---
 
-Built by Vincent Rupp. Shared for portfolio and review purposes; please get in touch before reusing it.
+Built by Vincent Rupp. Released under the MIT License; see `LICENSE`.
