@@ -27,6 +27,10 @@ Evaluated once, on the held-out modern-era catchers: **0.94 AUC**, 95% accuracy,
 
 As a last step, the model is retrained with Joe Mauer's row fully removed from training and tuning, then used to predict Mauer's own Hall of Fame probability from his career stats alone — a clean way to sanity-check the model against a real, well-known case without letting his row leak into training.
 
+## Data
+
+Player stats come from the Lahman database (via the `Lahman` R package) plus a manually compiled spreadsheet of career stats for every qualified catcher (`All Qualified Catchers Stats.xlsx`, included).
+
 ## Files
 
 - `Catchers HOF Model.qmd` — full data pipeline, feature engineering, model tuning, and evaluation
@@ -37,3 +41,7 @@ As a last step, the model is retrained with Joe Mauer's row fully removed from t
 ## Tech
 
 R, tidyverse, tidymodels, glmnet, the Lahman baseball database
+
+---
+
+Built by Vincent Rupp. Shared for portfolio and review purposes; please get in touch before reusing it.
